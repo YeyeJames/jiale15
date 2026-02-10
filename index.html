@@ -1,0 +1,969 @@
+
+<!DOCTYPE html>
+<html lang="zh-TW" class="text-[14px] sm:text-[15px] lg:text-[16px]">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>佳樂身心診所 - 預約管理系統</title>
+    
+    <!-- PWA / Mobile Optimized Meta -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="佳樂診所">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              brand: {
+                yellow: '#f9e076',
+                olive: '#d4ca91',
+                orange: '#ffb85f',
+                dark: '#44403c'
+              }
+            },
+            borderRadius: { '4xl': '2rem' }
+          }
+        }
+      }
+    </script>
+
+    <style>
+      body { 
+        font-family: 'Noto Sans TC', sans-serif; 
+        color: #44403c; 
+        background-color: #fffef9;
+        -webkit-tap-highlight-color: transparent;
+        overflow-x: hidden;
+      }
+      ::-webkit-scrollbar { width: 5px; height: 5px; }
+      ::-webkit-scrollbar-track { background: #fffef0; }
+      ::-webkit-scrollbar-thumb { background: #ffb85f; border-radius: 10px; }
+      
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+
+      @media print {
+        @page { size: A4; margin: 1cm; }
+        body { background-color: white !important; -webkit-print-color-adjust: exact; }
+        aside, nav, button, input, .print-hidden { display: none !important; }
+        main { padding: 0 !important; margin: 0 !important; }
+        .salary-slip { page-break-after: always; border: 1px solid #eee !important; padding: 2rem !important; }
+      }
+      
+      #loading {
+        position: fixed; inset: 0; display: flex; justify-content: center; align-items: center;
+        background: #fffef9; z-index: 9999; flex-direction: column; gap: 1rem;
+      }
+
+      /* Compact inputs */
+      input, select, textarea { font-size: 0.875rem !important; }
+
+      @keyframes wave {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-10px); }
+      }
+      .animate-wave { animation: wave 3s ease-in-out infinite; }
+    </style>
+
+    <script type="importmap">
+{
+  "imports": {
+    "lucide-react": "https://esm.sh/lucide-react@0.474.0",
+    "react": "https://esm.sh/react@19.0.0",
+    "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
+    "date-fns": "https://esm.sh/date-fns@4.1.0",
+    "react/": "https://esm.sh/react@^19.2.4/"
+  }
+}
+</script>
+  <link rel="stylesheet" href="/index.css">
+</head>
+  <body class="antialiased selection:bg-brand-yellow/30">
+    <div id="root"></div>
+    <div id="loading">
+        <svg class="animate-spin h-6 w-6 text-brand-orange" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <span class="font-bold text-brand-orange text-xs tracking-widest">系統啟動中...</span>
+    </div>
+
+    <script type="text/babel" data-type="module">
+      import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+      import { createRoot } from 'react-dom/client';
+      import { format, addDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths, isToday } from 'date-fns';
+      import { 
+        Plus, ChevronLeft, ChevronRight, Calendar, CheckCircle, Banknote, Trash2, RotateCcw, 
+        TriangleAlert, Coffee, Sparkles, Filter, FileText, Info, CalendarDays, X, UserMinus, 
+        MousePointer2, Settings, Menu, LogOut, User as UserIcon, ChartColumn, 
+        DollarSign, Briefcase, Printer, ChartPie, Users, ReceiptText, 
+        ChevronDown, ChevronUp, UserCheck, TrendingUp, ClipboardList, Stethoscope, 
+        Shield, Database, Download, Upload, UserRound, LayoutGrid, List, ChartBar,
+        Clock, ArrowUp, ArrowDown
+      } from 'lucide-react';
+
+      // --- DATA SERVICE ---
+      const KEYS = { THERAPISTS: 'jiale_therapists', TREATMENTS: 'jiale_treatments', APPOINTMENTS: 'jiale_appointments', USERS: 'jiale_users' };
+      const DataService = {
+        getTherapists: () => JSON.parse(localStorage.getItem(KEYS.THERAPISTS)) || [
+          { id: 't1', name: '陳心理師', category: '心理' },
+          { id: 't2', name: '林物理治療師', category: '職能' },
+          { id: 't3', name: '王職能治療師', category: '職能' },
+          { id: 't_rtms', name: '執行醫師', category: 'rTMS' },
+        ],
+        saveTherapists: (data) => localStorage.setItem(KEYS.THERAPISTS, JSON.stringify(data)),
+        getTreatments: () => JSON.parse(localStorage.getItem(KEYS.TREATMENTS)) || [
+          { id: 'tr1', name: '心理衡鑑', patientPrice: 2000, therapistFee: 1000, category: '心理' },
+          { id: 'tr2', name: '個別心理治療', patientPrice: 1600, therapistFee: 800, category: '心理' },
+          { id: 'tr_other_psy', name: '其他', patientPrice: 0, therapistFee: 0, category: '心理' },
+          { id: 'tr3', name: '職能發展評估', patientPrice: 1200, therapistFee: 600, category: '職能' },
+          { id: 'tr4', name: '精細動作訓練', patientPrice: 800, therapistFee: 400, category: '職能' },
+          { id: 'tr_other_ot', name: '其他', patientPrice: 0, therapistFee: 0, category: '職能' },
+          { id: 'tr_rtms', name: 'rTMS', patientPrice: 3500, therapistFee: 0, category: 'rTMS' },
+          { id: 'tr_rtms_free', name: 'rTMS (送)', patientPrice: 0, therapistFee: 0, category: 'rTMS' },
+          { id: 'tr_rtms_short', name: 'rTMS(短療程)', patientPrice: 2500, therapistFee: 0, category: 'rTMS' },
+          { id: 'tr_other_rtms', name: '其他', patientPrice: 0, therapistFee: 0, category: 'rTMS' },
+        ],
+        saveTreatments: (data) => localStorage.setItem(KEYS.TREATMENTS, JSON.stringify(data)),
+        getAppointments: () => JSON.parse(localStorage.getItem(KEYS.APPOINTMENTS)) || [],
+        saveAppointments: (data) => localStorage.setItem(KEYS.APPOINTMENTS, JSON.stringify(data)),
+        getUsers: () => JSON.parse(localStorage.getItem(KEYS.USERS)) || [
+          { id: 'u1', username: 'jiale', password: 'jiale', name: '管理員', role: 'admin' },
+          { id: 'u2', username: 'staff', password: 'staff', name: '櫃檯人員', role: 'staff' },
+        ],
+        saveUsers: (data) => localStorage.setItem(KEYS.USERS, JSON.stringify(data)),
+      };
+
+      // --- SHARED COMPONENTS ---
+      const JialeLogo = ({ className = "w-6 h-6", color = "#ffb85f" }) => (
+        <svg viewBox="0 0 100 100" className={className} fill="none">
+          <path d="M45 15C30 15 18 27 18 42C18 65 40 85 82 85C70 85 58 75 58 60C58 45 65 35 75 25C65 18 55 15 45 15Z" fill="#f9e076" />
+          <circle cx="70" cy="45" r="12" fill={color} />
+        </svg>
+      );
+
+      const Button = ({ children, variant = 'primary', size = 'md', className = '', icon, type = 'button', ...props }) => {
+        const variants = {
+          primary: "bg-[#ffb85f] text-white hover:bg-[#ffa726] shadow-sm",
+          secondary: "bg-white text-stone-700 border border-stone-200 hover:bg-stone-50",
+          danger: "bg-red-50 text-red-600 border border-red-100 hover:bg-red-100",
+          ghost: "bg-transparent text-stone-500 hover:bg-stone-100",
+        };
+        const sizes = {
+          sm: "h-8 px-3 text-[11px] font-bold rounded-lg",
+          md: "h-10 px-4 text-xs font-bold rounded-xl",
+          lg: "h-12 px-6 text-sm font-black rounded-xl",
+          xl: "h-14 px-8 text-base font-black rounded-2xl",
+        };
+        return (
+          <button type={type} className={`inline-flex items-center justify-center transition-all active:scale-[0.96] disabled:opacity-50 ${variants[variant]} ${sizes[size]} ${className}`} {...props}>
+            {icon && <span className="mr-1.5">{icon}</span>}
+            {children}
+          </button>
+        );
+      };
+
+      const Modal = ({ isOpen, onClose, title, children, footer }) => {
+        if (!isOpen) return null;
+        return (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 bg-stone-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-white rounded-[1.5rem] shadow-2xl w-full max-w-lg flex flex-col max-h-[95vh] overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-3 border-b border-stone-100 bg-stone-50/50">
+                <h3 className="text-sm font-black text-stone-800">{title}</h3>
+                <button onClick={onClose} className="text-stone-400 hover:bg-white p-1.5 rounded-full transition-all shadow-sm"><X size={16}/></button>
+              </div>
+              <div className="p-5 overflow-y-auto no-scrollbar">{children}</div>
+              {footer && <div className="px-5 py-3 bg-stone-50/50 border-t border-stone-100 flex justify-end gap-2">{footer}</div>}
+            </div>
+          </div>
+        );
+      };
+
+      const StatusBadge = ({ status }) => {
+        const styles = {
+          'scheduled': 'bg-amber-50 text-amber-600 ring-amber-200/50',
+          'completed': 'bg-emerald-50 text-emerald-600 ring-emerald-200/50',
+          'cancelled': 'bg-stone-100 text-stone-500 ring-stone-200/50',
+        };
+        const labels = { 'scheduled': '預約中', 'completed': '已報到', 'cancelled': '已取消' };
+        return <span className={`px-2 py-0.5 rounded-full text-[9px] font-black tracking-wider ring-1 ring-inset ${styles[status]}`}>{labels[status]}</span>;
+      };
+
+      // --- VIEWS ---
+      const LoginView = ({ users, onLogin }) => {
+        const [u, setU] = useState('');
+        const [p, setP] = useState('');
+        const [err, setErr] = useState('');
+        const sub = (e) => {
+          e.preventDefault();
+          const user = users.find(x => x.username === u && x.password === p);
+          if (user) onLogin(user); else setErr('帳號或密碼錯誤');
+        };
+        return (
+          <div className="min-h-screen w-full bg-[#fffef9] flex items-center justify-center p-4 relative text-center">
+            <div className="w-full max-w-xs bg-white p-8 rounded-[2rem] shadow-2xl border border-stone-50 relative z-10">
+              <div className="mb-6">
+                <div className="inline-flex p-3 bg-amber-50 rounded-2xl mb-3"><JialeLogo className="w-10 h-10" /></div>
+                <h1 className="text-2xl font-black text-stone-800">佳樂身心診所</h1>
+                <p className="text-[10px] text-brand-orange font-bold uppercase mt-1 tracking-widest">Management Platform</p>
+              </div>
+              <form onSubmit={sub} className="space-y-3">
+                <input className="w-full h-11 px-4 rounded-xl border border-stone-200 focus:border-brand-orange focus:ring-4 focus:ring-brand-orange/10 outline-none font-bold text-sm" placeholder="帳號" value={u} onChange={e=>setU(e.target.value)} required />
+                <input type="password" className="w-full h-11 px-4 rounded-xl border border-stone-200 focus:border-brand-orange focus:ring-4 focus:ring-brand-orange/10 outline-none font-bold text-sm" placeholder="密碼" value={p} onChange={e=>setP(e.target.value)} required />
+                {err && <p className="text-red-500 text-[10px] text-center font-bold">{err}</p>}
+                <Button type="submit" size="lg" className="w-full">登入系統</Button>
+              </form>
+            </div>
+          </div>
+        );
+      };
+
+      const ScheduleView = ({ appointments, therapists, treatments, onAddAppointment, onUpdateAppointment, onDeleteAppointment }) => {
+        const [viewMode, setViewMode] = useState('day'); 
+        const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+        const [isAddOpen, setIsAddOpen] = useState(false);
+        const [formCat, setFormCat] = useState('心理');
+        const [action, setAction] = useState(null); // { type: 'cancel' | 'delete', apt: a, note: string }
+        const [form, setForm] = useState({ patientName: '', patientPhone: '', time: '09:00', therapistId: '', treatmentId: '', notes: '', customP: '', customF: '' });
+        
+        // Time Edit State
+        const [editingTimeApt, setEditingTimeApt] = useState(null); 
+        const [newTimeVal, setNewTimeVal] = useState('');
+
+        const parse = (s) => { const [y,m,d] = s.split('-').map(Number); return new Date(y,m-1,d); };
+        const getApts = (d) => appointments.filter(a => a.date === d).sort((a,b)=>a.time.localeCompare(b.time));
+
+        const handleJumpToDay = (dateStr, e) => {
+          e.stopPropagation();
+          setSelectedDate(dateStr);
+          setViewMode('day');
+        };
+
+        const handleOpenAdd = (dateStr) => {
+          setSelectedDate(dateStr);
+          setIsAddOpen(true);
+        };
+
+        const handleTimeClick = (apt) => {
+          setEditingTimeApt(apt);
+          setNewTimeVal(apt.time);
+        };
+        
+        const saveNewTime = () => {
+           if(editingTimeApt && newTimeVal) {
+             onUpdateAppointment(editingTimeApt.id, { time: newTimeVal });
+             setEditingTimeApt(null);
+           }
+        };
+
+        const currentApts = useMemo(() => getApts(selectedDate), [appointments, selectedDate]);
+        const stats = useMemo(() => ({
+          total: currentApts.length,
+          done: currentApts.filter(a => a.status === 'completed').length,
+          rev: currentApts.reduce((s, a) => s + (a.isPaid ? a.paidAmount : 0), 0)
+        }), [currentApts]);
+
+        const filteredT = therapists.filter(t => t.category === formCat);
+        const filteredTr = useMemo(() => {
+          const t = therapists.find(x => x.id === form.therapistId);
+          return t ? treatments.filter(tr => tr.category === t.category) : [];
+        }, [form.therapistId, therapists, treatments]);
+
+        const sub = (e) => {
+          e.preventDefault();
+          const tr = treatments.find(x => x.id === form.treatmentId);
+          const isOther = tr?.name === '其他';
+          onAddAppointment({
+            ...form,
+            date: selectedDate,
+            status: 'scheduled',
+            patientPrice: isOther ? (parseFloat(form.customP)||0) : tr.patientPrice,
+            therapistFee: isOther ? (parseFloat(form.customF)||0) : tr.therapistFee,
+            paidAmount: 0, isPaid: false
+          });
+          setIsAddOpen(false);
+          setForm({ patientName: '', patientPhone: '', time: '09:00', therapistId: '', treatmentId: '', notes: '', customP: '', customF: '' });
+        };
+
+        const weekDays = useMemo(() => eachDayOfInterval({ start: startOfWeek(parse(selectedDate)), end: endOfWeek(parse(selectedDate)) }), [selectedDate]);
+        const monthDays = useMemo(() => eachDayOfInterval({ start: startOfWeek(startOfMonth(parse(selectedDate))), end: endOfWeek(endOfMonth(parse(selectedDate))) }), [selectedDate]);
+
+        return (
+          <div className="space-y-4 sm:space-y-5 max-w-full">
+            {/* Header: Date Controls */}
+            <div className="flex flex-col md:flex-row gap-3 md:items-center justify-between bg-white p-3 sm:p-4 rounded-2xl shadow-sm border border-stone-100">
+              <div className="flex items-center gap-2">
+                <button onClick={()=>setSelectedDate(format(addDays(parse(selectedDate), viewMode==='month'?-30:viewMode==='week'?-7:-1), 'yyyy-MM-dd'))} className="p-2 bg-stone-50 rounded-lg hover:bg-stone-100 border border-stone-100 transition-all"><ChevronLeft size={16}/></button>
+                <div className="text-center min-w-[100px]">
+                  <p className="text-[9px] font-black text-stone-400 uppercase tracking-widest leading-none">{format(parse(selectedDate), 'yyyy')}</p>
+                  <p className="text-base font-black text-stone-800">{viewMode==='month' ? format(parse(selectedDate), 'MM月') : format(parse(selectedDate), 'MM/dd')}</p>
+                </div>
+                <button onClick={()=>setSelectedDate(format(addDays(parse(selectedDate), viewMode==='month'?30:viewMode==='week'?7:1), 'yyyy-MM-dd'))} className="p-2 bg-stone-50 rounded-lg hover:bg-stone-100 border border-stone-100 transition-all"><ChevronRight size={16}/></button>
+                <button onClick={()=>setSelectedDate(format(new Date(), 'yyyy-MM-dd'))} className="ml-1 text-[10px] font-bold text-brand-orange bg-amber-50 px-2.5 py-1.5 rounded-lg border border-amber-100 transition-colors hover:bg-amber-100">今日</button>
+              </div>
+
+              <div className="flex items-center gap-1 bg-stone-100 p-1 rounded-xl">
+                {['day', 'week', 'month'].map(m => (
+                  <button key={m} onClick={()=>setViewMode(m)} className={`px-4 py-1.5 rounded-lg text-[11px] font-black transition-all ${viewMode===m ? 'bg-white shadow-sm text-stone-800' : 'text-stone-400'}`}>{m === 'day' ? '日' : m === 'week' ? '週' : '月'}</button>
+                ))}
+              </div>
+
+              <Button onClick={()=>setIsAddOpen(true)} size="md" icon={<Plus size={14} strokeWidth={3}/>}>新增預約</Button>
+            </div>
+
+            {/* View Content */}
+            {viewMode === 'day' && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                  <div className="bg-white p-3 rounded-xl border border-stone-100 flex flex-col sm:flex-row items-center gap-2 sm:gap-4">
+                    <div className="w-8 h-8 bg-amber-50 text-brand-orange rounded-lg flex items-center justify-center shrink-0"><Calendar size={16}/></div>
+                    <div className="text-center sm:text-left"><p className="text-[9px] text-stone-400 font-bold uppercase">預約</p><p className="text-sm font-black text-stone-800">{stats.total}</p></div>
+                  </div>
+                  <div className="bg-white p-3 rounded-xl border border-stone-100 flex flex-col sm:flex-row items-center gap-2 sm:gap-4">
+                    <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center shrink-0"><CheckCircle size={16}/></div>
+                    <div className="text-center sm:text-left"><p className="text-[9px] text-stone-400 font-bold uppercase">已報到</p><p className="text-sm font-black text-stone-800">{stats.done}</p></div>
+                  </div>
+                  <div className="bg-white p-3 rounded-xl border border-stone-100 flex flex-col sm:flex-row items-center gap-2 sm:gap-4">
+                    <div className="w-8 h-8 bg-yellow-50 text-yellow-600 rounded-lg flex items-center justify-center shrink-0"><Banknote size={16}/></div>
+                    <div className="text-center sm:text-left"><p className="text-[9px] text-stone-400 font-bold uppercase">營收</p><p className="text-sm font-black text-stone-800">${stats.rev.toLocaleString()}</p></div>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-2xl shadow-sm border border-stone-100 overflow-hidden min-h-[300px] flex flex-col">
+                   <div className="divide-y divide-stone-50">
+                    {currentApts.length === 0 ? (
+                      <div className="py-24 px-8 text-center flex flex-col items-center justify-center space-y-6">
+                        <div className="relative">
+                          <div className="w-24 h-24 bg-amber-50 rounded-[2rem] flex items-center justify-center text-amber-500 animate-wave">
+                             <Coffee size={48} strokeWidth={1.5} />
+                          </div>
+                          <Sparkles className="absolute -top-2 -right-2 text-yellow-400 animate-pulse" size={24} />
+                        </div>
+                        <div className="space-y-2">
+                           <h3 className="text-xl font-black text-stone-800">今天暫時沒有預約喔！</h3>
+                           <p className="text-stone-400 font-bold text-xs leading-relaxed max-w-[200px] mx-auto">
+                              給自己倒杯咖啡，放鬆一下，或者點擊下方按鈕開始排程吧。
+                           </p>
+                        </div>
+                        <Button onClick={()=>setIsAddOpen(true)} variant="secondary" size="sm" icon={<Plus size={14}/>}>建立首筆預約</Button>
+                      </div>
+                    ) : currentApts.map(a => (
+                      <div key={a.id} className="p-3 sm:p-4 flex flex-col hover:bg-stone-50/50 group">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3 flex-1 overflow-hidden">
+                            <div 
+                               onClick={() => handleTimeClick(a)}
+                               className="text-xs font-black text-stone-800 w-12 shrink-0 h-8 flex items-center justify-center bg-stone-100 rounded-lg cursor-pointer hover:bg-brand-orange hover:text-white transition-all border border-stone-200"
+                               title="點擊修改時間"
+                            >
+                               {a.time}
+                            </div>
+                            <div className="flex-1 overflow-hidden">
+                              <div className="flex items-center gap-2 mb-0.5">
+                                <span className="text-sm font-black text-stone-800 truncate max-w-[80px] sm:max-w-none">{a.patientName}</span>
+                                <StatusBadge status={a.status} />
+                                <span className={`px-2 py-0.5 rounded-lg text-[9px] font-black ${a.isPaid ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                  {a.isPaid ? `已收 ${a.paidAmount} 元` : `${a.patientPrice} 元`}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-stone-400 font-bold truncate">
+                                {treatments.find(x=>x.id===a.treatmentId)?.name} • {therapists.find(x=>x.id===a.therapistId)?.name}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                             {a.status === 'scheduled' ? (
+                               <>
+                                 <button onClick={()=>onUpdateAppointment(a.id, {status:'completed', isPaid:true, paidAmount:a.patientPrice})} className="bg-brand-orange text-white px-3 py-1.5 rounded-lg text-[10px] font-black shadow-sm mr-1">報到</button>
+                                 <button onClick={()=>setAction({type:'cancel', apt:a, note: a.notes || ''})} className="bg-red-50 text-red-500 px-3 py-1.5 rounded-lg text-[10px] font-black border border-red-100">請假</button>
+                               </>
+                             ) : (
+                               <button onClick={()=>onUpdateAppointment(a.id, {status:'scheduled', isPaid:false, paidAmount:0})} className="text-stone-400 p-2 hover:bg-stone-100 rounded-lg transition-all"><RotateCcw size={14}/></button>
+                             )}
+                             <button onClick={()=>setAction({type:'delete', apt:a})} className="text-stone-300 hover:text-red-500 p-2 hover:bg-red-50 rounded-lg transition-all"><Trash2 size={14}/></button>
+                          </div>
+                        </div>
+                        {/* 備註呈現區 */}
+                        {a.notes && (
+                           <div className="mt-2 ml-12 bg-stone-50 p-2 rounded-lg border border-stone-100 flex items-start gap-2 animate-in fade-in duration-300">
+                              <div className="mt-0.5 text-stone-300"><FileText size={12}/></div>
+                              <p className="text-[10px] text-stone-500 font-medium leading-relaxed italic">{a.notes}</p>
+                           </div>
+                        )}
+                      </div>
+                    ))}
+                   </div>
+                </div>
+              </div>
+            )}
+
+            {viewMode === 'week' && (
+              <div className="grid grid-cols-1 sm:grid-cols-7 gap-2">
+                {weekDays.map(d => {
+                  const ds = format(d, 'yyyy-MM-dd');
+                  const da = getApts(ds);
+                  return (
+                    <div key={ds} className={`bg-white rounded-xl border min-h-[100px] p-1.5 flex flex-col gap-1.5 ${isToday(d) ? 'border-brand-orange shadow-md' : 'border-stone-100'}`}>
+                      <div onClick={()=>handleOpenAdd(ds)} className={`text-center py-1.5 rounded-lg cursor-pointer hover:bg-stone-50 transition-all ${isToday(d) ? 'bg-amber-50' : 'bg-stone-50/50'}`}>
+                        <p className="text-[9px] font-black text-stone-400 uppercase leading-none">{format(d, 'EEE')}</p>
+                        <p className="text-sm font-black text-stone-800 leading-none">{format(d, 'd')}</p>
+                      </div>
+                      <div className="space-y-1 overflow-y-auto max-h-[150px] no-scrollbar">
+                        {da.map(a => (
+                          <div key={a.id} onClick={(e)=>handleJumpToDay(ds,e)} className={`p-1.5 rounded-lg border text-[9px] font-bold cursor-pointer hover:border-brand-orange ${a.status==='completed'?'bg-emerald-50 text-emerald-700 border-emerald-100':'bg-stone-50 text-stone-600 border-stone-100'}`}>
+                            <div className="flex justify-between mb-0.5 truncate"><span>{a.time}</span></div>
+                            <div className="truncate font-black">{a.patientName}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {viewMode === 'month' && (
+              <div className="bg-white p-2 rounded-2xl border border-stone-100 shadow-sm overflow-hidden">
+                <div className="grid grid-cols-7 gap-1 mb-1 text-center text-[10px] font-black text-stone-400 uppercase">
+                   {['日','一','二','三','四','五','六'].map(w=><div key={w} className="py-1">{w}</div>)}
+                </div>
+                <div className="grid grid-cols-7 gap-1">
+                  {monthDays.map(d => {
+                    const ds = format(d, 'yyyy-MM-dd');
+                    const da = getApts(ds);
+                    const isCurM = isSameMonth(d, parse(selectedDate));
+                    return (
+                      <div 
+                        key={ds} 
+                        onClick={()=>handleOpenAdd(ds)}
+                        className={`min-h-[70px] sm:min-h-[85px] p-1 rounded-xl border transition-all cursor-pointer relative group ${isToday(d) ? 'border-brand-orange bg-amber-50/10' : 'border-stone-50 hover:border-stone-200'} ${!isCurM ? 'opacity-25' : ''}`}
+                      >
+                        <span 
+                          onClick={(e)=>handleJumpToDay(ds, e)}
+                          className={`text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-lg hover:bg-brand-orange hover:text-white transition-colors ${isToday(d)?'bg-brand-orange text-white shadow-sm':'text-stone-400'}`}
+                        >
+                          {format(d, 'd')}
+                        </span>
+                        <div className="mt-1 flex flex-wrap gap-0.5">
+                           {da.slice(0,4).map(a=>(
+                             <div key={a.id} className={`w-1.5 h-1.5 rounded-full ${a.status==='completed'?'bg-emerald-400':'bg-amber-400'}`}></div>
+                           ))}
+                           {da.length > 4 && <div className="text-[7px] text-stone-400 font-bold">+{da.length-4}</div>}
+                        </div>
+                        <Plus size={12} className="absolute bottom-1 right-1 text-stone-200 opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            
+            {/* Edit Time Modal */}
+            <Modal isOpen={!!editingTimeApt} onClose={() => setEditingTimeApt(null)} title="修改預約時間">
+               <div className="space-y-4">
+                  <div className="p-4 bg-amber-50 rounded-xl border border-amber-100 flex items-center gap-3">
+                     <Clock size={20} className="text-amber-500"/>
+                     <p className="text-sm font-bold text-stone-700">正在修改 <span className="text-amber-600 font-black">{editingTimeApt?.patientName}</span> 的預約時間</p>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-black text-stone-400 uppercase tracking-widest mb-1 ml-1">新時間</label>
+                    <input type="time" className="w-full h-12 px-4 rounded-xl border border-stone-200 font-bold bg-stone-50 outline-none focus:border-brand-orange text-lg" value={newTimeVal} onChange={e=>setNewTimeVal(e.target.value)} />
+                  </div>
+                  <Button onClick={saveNewTime} size="lg" className="w-full mt-2">儲存修改</Button>
+               </div>
+            </Modal>
+
+            {/* Action Confirmation Modals */}
+            <Modal 
+               isOpen={!!action} 
+               onClose={()=>setAction(null)} 
+               title={action?.type === 'delete' ? "確定刪除預約" : "確認請假 / 取消"} 
+               footer={
+                  <>
+                     <Button variant="secondary" size="md" onClick={()=>setAction(null)}>返回</Button>
+                     <Button 
+                        variant="danger" 
+                        size="md" 
+                        onClick={()=>{
+                           if(action.type === 'delete') onDeleteAppointment(action.apt.id);
+                           else onUpdateAppointment(action.apt.id, {status:'cancelled', notes: action.note});
+                           setAction(null);
+                        }}
+                     >
+                        確定執行
+                     </Button>
+                  </>
+               }
+            >
+              <div className="space-y-4">
+                <div className={`flex items-center gap-4 p-3 rounded-xl border ${action?.type === 'delete' ? 'bg-red-50 border-red-100' : 'bg-amber-50 border-amber-100'}`}>
+                  <div className={`p-2 rounded-lg shrink-0 ${action?.type === 'delete' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-600'}`}>
+                     {action?.type === 'delete' ? <Trash2 size={20} /> : <TriangleAlert size={20} />}
+                  </div>
+                  <p className="text-xs font-bold text-stone-700 leading-relaxed">
+                     {action?.type === 'delete' ? (
+                        <>確定要永久刪除個案 <span className="text-red-600 font-black">{action?.apt?.patientName}</span> 的紀錄嗎？此動作將無法復原。</>
+                     ) : (
+                        <>確定取消個案 <span className="text-amber-600 font-black">{action?.apt?.patientName}</span> 的預約嗎？</>
+                     )}
+                  </p>
+                </div>
+                {action?.type === 'cancel' && (
+                  <div>
+                    <label className="block text-[10px] font-black text-stone-400 uppercase tracking-widest mb-1 ml-1">取消原因 / 備註</label>
+                    <textarea 
+                      className="w-full h-20 p-2 rounded-lg border border-stone-200 font-bold bg-stone-50 outline-none resize-none focus:border-amber-300 transition-all text-xs" 
+                      placeholder="原因或備註..." 
+                      value={action?.note || ''} 
+                      onChange={e => setAction({...action, note: e.target.value})} 
+                    />
+                  </div>
+                )}
+              </div>
+            </Modal>
+
+            {/* Add Appointment Modal */}
+            <Modal isOpen={isAddOpen} onClose={()=>setIsAddOpen(false)} title="新增預約排程">
+              <form onSubmit={sub} className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-black text-stone-400 uppercase tracking-widest mb-1 ml-1">個案姓名</label>
+                    <input className="w-full h-9 px-3 rounded-lg border border-stone-200 font-bold bg-stone-50 outline-none focus:border-brand-orange" placeholder="姓名" value={form.patientName} onChange={e=>setForm({...form, patientName:e.target.value})} required />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-black text-stone-400 uppercase tracking-widest mb-1 ml-1">時間</label>
+                    <input type="time" className="w-full h-9 px-3 rounded-lg border border-stone-200 font-bold bg-stone-50 outline-none focus:border-brand-orange" value={form.time} onChange={e=>setForm({...form, time:e.target.value})} required />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] font-black text-stone-400 uppercase tracking-widest ml-1">預約科別</label>
+                  <div className="flex gap-1 p-0.5 bg-stone-100 rounded-lg">
+                    {['心理','職能','rTMS'].map(c=>(
+                      <button key={c} type="button" onClick={()=>setFormCat(c)} className={`flex-1 py-1 rounded-md text-[10px] font-black transition-all ${formCat===c ? 'bg-white shadow-sm text-stone-800 border border-stone-100':'text-stone-400'}`}>{c}</button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-black text-stone-400 uppercase tracking-widest mb-1 ml-1">主責人員</label>
+                    <select className="w-full h-9 px-2 rounded-lg border border-stone-200 font-bold bg-stone-50 outline-none focus:border-brand-orange" value={form.therapistId} onChange={e=>setForm({...form, therapistId:e.target.value})} required>
+                      <option value="">選擇人員</option>
+                      {filteredT.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-black text-stone-400 uppercase tracking-widest mb-1 ml-1">治療項目</label>
+                    <select className="w-full h-9 px-2 rounded-lg border border-stone-200 font-bold bg-stone-50 outline-none focus:border-brand-orange" value={form.treatmentId} onChange={e=>setForm({...form, treatmentId:e.target.value})} required disabled={!form.therapistId}>
+                      <option value="">選擇項目</option>
+                      {filteredTr.map(tr=><option key={tr.id} value={tr.id}>{tr.name} {tr.name!=='其他' && `($${tr.patientPrice})`}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                {treatments.find(x=>x.id===form.treatmentId)?.name === '其他' && (
+                  <div className="grid grid-cols-2 gap-3 animate-in zoom-in-95 duration-200">
+                    <div>
+                       <label className="block text-[9px] text-amber-600 font-bold mb-1 ml-1">實收金額</label>
+                       <input type="number" className="w-full h-9 px-3 rounded-lg border border-amber-200 font-bold bg-amber-50" value={form.customP} onChange={e=>setForm({...form, customP:e.target.value})} required />
+                    </div>
+                    <div>
+                       <label className="block text-[9px] text-amber-600 font-bold mb-1 ml-1">人員薪資</label>
+                       <input type="number" className="w-full h-9 px-3 rounded-lg border border-amber-200 font-bold bg-amber-50" value={form.customF} onChange={e=>setForm({...form, customF:e.target.value})} required />
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-[10px] font-black text-stone-400 uppercase tracking-widest mb-1 ml-1">備註 (選填)</label>
+                  <textarea className="w-full h-14 p-2 rounded-lg border border-stone-200 font-bold bg-stone-50 outline-none resize-none focus:border-brand-orange" placeholder="..." value={form.notes} onChange={e=>setForm({...form, notes:e.target.value})} />
+                </div>
+
+                <div className="pt-1">
+                  <Button type="submit" size="lg" className="w-full" disabled={!form.treatmentId}>建立預約</Button>
+                </div>
+              </form>
+            </Modal>
+          </div>
+        );
+      };
+
+      const SettingsView = ({ currentUser, therapists, treatments, users, onUpdateTherapists, onUpdateTreatments, onUpdateUsers }) => {
+        const [tab, setTab] = useState(currentUser.role === 'admin' ? 't' : 'd');
+        const [trForm, setTrForm] = useState({ name: '', price: '', fee: '', cat: '心理' });
+        const [isTModalOpen, setIsTModalOpen] = useState(false);
+        const [tForm, setTForm] = useState({ name: '', category: '心理' });
+        const [confirmAction, setConfirmAction] = useState(null); // { type, data, title, msg }
+
+        const categories = ['心理', '職能', 'rTMS'];
+
+        const handleExport = () => {
+          const blob = new Blob([JSON.stringify({ therapists, treatments, appointments: DataService.getAppointments(), users, date: new Date().toISOString() }, null, 2)], { type: 'application/json' });
+          const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `Jiale_Backup_${format(new Date(),'yyyyMMdd')}.json`; a.click();
+        };
+
+        const handleAddTr = (e) => {
+          e.preventDefault();
+          onUpdateTreatments([...treatments, { id: `tr_${Date.now()}`, name: trForm.name, patientPrice: parseInt(trForm.price), therapistFee: parseInt(trForm.fee), category: trForm.cat }]);
+          setTrForm({ name: '', price: '', fee: '', cat: '心理' });
+        };
+
+        const handleAddT = (e) => {
+          e.preventDefault();
+          onUpdateTherapists([...therapists, { id: `t_${Date.now()}`, name: tForm.name, category: tForm.category }]);
+          setIsTModalOpen(false);
+          setTForm({ name: '', category: '心理' });
+        };
+
+        const executeDelete = () => {
+          if (confirmAction.type === 't') onUpdateTherapists(therapists.filter(x => x.id !== confirmAction.data.id));
+          if (confirmAction.type === 'tr') onUpdateTreatments(treatments.filter(x => x.id !== confirmAction.data.id));
+          setConfirmAction(null);
+        };
+        
+        // Sorting Logic
+        const moveItem = (id, direction, list, updater) => {
+            const index = list.findIndex(i => i.id === id);
+            if (index === -1) return;
+            const item = list[index];
+            const catItems = list.filter(i => i.category === item.category);
+            const catIndex = catItems.findIndex(i => i.id === id);
+            
+            let swapTarget = null;
+            if (direction === 'up' && catIndex > 0) {
+                swapTarget = catItems[catIndex - 1];
+            } else if (direction === 'down' && catIndex < catItems.length - 1) {
+                swapTarget = catItems[catIndex + 1];
+            }
+            
+            if (swapTarget) {
+                const targetIndex = list.findIndex(i => i.id === swapTarget.id);
+                const newList = [...list];
+                // Swap in the master list to persist order
+                newList[index] = swapTarget;
+                newList[targetIndex] = item;
+                updater(newList);
+            }
+        };
+
+        return (
+          <div className="space-y-4 sm:space-y-6">
+             <div className="bg-white p-1.5 rounded-xl shadow-sm border border-stone-100 flex gap-1.5 overflow-x-auto no-scrollbar">
+                {currentUser.role === 'admin' && (
+                  <>
+                    <button onClick={()=>setTab('t')} className={`px-4 py-1.5 rounded-lg text-[11px] font-black transition-all whitespace-nowrap ${tab==='t'?'bg-stone-900 text-white shadow-sm':'text-stone-400'}`}>人員名單</button>
+                    <button onClick={()=>setTab('tr')} className={`px-4 py-1.5 rounded-lg text-[11px] font-black transition-all whitespace-nowrap ${tab==='tr'?'bg-stone-900 text-white shadow-sm':'text-stone-400'}`}>項目薪資</button>
+                  </>
+                )}
+                <button onClick={()=>setTab('d')} className={`px-4 py-1.5 rounded-lg text-[11px] font-black transition-all whitespace-nowrap ${tab==='d'?'bg-stone-900 text-white shadow-sm':'text-stone-400'}`}>系統備份</button>
+             </div>
+
+             <div className="bg-white rounded-2xl p-5 sm:p-6 border border-stone-100 shadow-sm min-h-[300px]">
+                {tab === 't' && (
+                   <div className="space-y-8">
+                      <div className="flex justify-between items-center">
+                        <h3 className="text-sm font-black text-stone-800">人員與醫師列表</h3>
+                        <Button size="sm" onClick={() => setIsTModalOpen(true)} icon={<Plus size={12}/>}>新增人員</Button>
+                      </div>
+                      
+                      {categories.map(cat => (
+                         <div key={cat} className="space-y-3">
+                            <h4 className="text-[10px] font-black text-brand-orange uppercase tracking-widest pl-1 border-l-2 border-brand-orange">{cat}區域</h4>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                              {therapists.filter(t => t.category === cat).map(t=>(
+                                <div key={t.id} className="p-3 bg-stone-50 rounded-xl border border-stone-100 flex justify-between items-center group transition-all hover:border-brand-yellow">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 bg-brand-yellow/20 text-brand-orange rounded-lg flex items-center justify-center font-black text-xs">{t.name[0]}</div>
+                                    <div><p className="text-xs font-black text-stone-800">{t.name}</p></div>
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                      <button onClick={() => moveItem(t.id, 'up', therapists, onUpdateTherapists)} className="p-1.5 text-stone-300 hover:text-stone-600 hover:bg-white rounded-lg"><ArrowUp size={12}/></button>
+                                      <button onClick={() => moveItem(t.id, 'down', therapists, onUpdateTherapists)} className="p-1.5 text-stone-300 hover:text-stone-600 hover:bg-white rounded-lg"><ArrowDown size={12}/></button>
+                                      <button onClick={()=>setConfirmAction({ type: 't', data: t, title: '刪除人員', msg: `確定要刪除人員「${t.name}」嗎？` })} className="p-1.5 text-stone-200 hover:text-red-500 transition-all ml-1"><Trash2 size={14}/></button>
+                                  </div>
+                                </div>
+                              ))}
+                              {therapists.filter(t => t.category === cat).length === 0 && <div className="text-xs text-stone-300 italic p-2">無人員資料</div>}
+                            </div>
+                         </div>
+                      ))}
+                   </div>
+                )}
+                {tab === 'tr' && (
+                   <div className="space-y-8">
+                      <form onSubmit={handleAddTr} className="grid grid-cols-2 md:grid-cols-5 gap-2 items-end bg-stone-50 p-3 rounded-xl border border-stone-100 mb-6">
+                         <div className="col-span-2 md:col-span-1">
+                            <label className="text-[9px] font-bold text-stone-400 mb-1 block">項目名稱</label>
+                            <input className="w-full h-8 px-2 rounded border border-stone-200 font-bold" value={trForm.name} onChange={e=>setTrForm({...trForm, name:e.target.value})} required />
+                         </div>
+                         <div>
+                            <label className="text-[9px] font-bold text-stone-400 mb-1 block">病人實收</label>
+                            <input type="number" className="w-full h-8 px-2 rounded border border-stone-200 font-bold" value={trForm.price} onChange={e=>setTrForm({...trForm, price:e.target.value})} required />
+                         </div>
+                         <div>
+                            <label className="text-[9px] font-bold text-stone-400 mb-1 block">人員薪資</label>
+                            <input type="number" className="w-full h-8 px-2 rounded border border-stone-200 font-bold" value={trForm.fee} onChange={e=>setTrForm({...trForm, fee:e.target.value})} required />
+                         </div>
+                         <div>
+                            <label className="text-[9px] font-bold text-stone-400 mb-1 block">類別</label>
+                            <select className="w-full h-8 px-1 rounded border border-stone-200 font-bold" value={trForm.cat} onChange={e=>setTrForm({...trForm, cat:e.target.value})}>
+                               {['心理','職能','rTMS'].map(c=><option key={c} value={c}>{c}</option>)}
+                            </select>
+                         </div>
+                         <Button type="submit" size="sm" className="w-full">新增項目</Button>
+                      </form>
+
+                      {categories.map(cat => (
+                         <div key={cat} className="space-y-2">
+                             <h4 className="text-[10px] font-black text-brand-orange uppercase tracking-widest pl-1 border-l-2 border-brand-orange">{cat}項目</h4>
+                             <div className="space-y-1 overflow-x-auto no-scrollbar">
+                                <table className="w-full text-left text-xs font-bold border-collapse">
+                                    <tbody className="divide-y divide-stone-50">
+                                       {treatments.filter(tr => tr.category === cat).map(tr => (
+                                         <tr key={tr.id} className="group hover:bg-stone-50 transition-all">
+                                            <td className="py-2 pl-2 w-1/3">{tr.name}</td>
+                                            <td className="py-2 text-stone-600">${tr.patientPrice}</td>
+                                            <td className="py-2 text-brand-orange">${tr.therapistFee}</td>
+                                            <td className="py-2 text-right pr-2">
+                                                <div className="flex items-center justify-end gap-1">
+                                                    <button onClick={() => moveItem(tr.id, 'up', treatments, onUpdateTreatments)} className="p-1 text-stone-300 hover:text-stone-600 hover:bg-white rounded"><ArrowUp size={12}/></button>
+                                                    <button onClick={() => moveItem(tr.id, 'down', treatments, onUpdateTreatments)} className="p-1 text-stone-300 hover:text-stone-600 hover:bg-white rounded"><ArrowDown size={12}/></button>
+                                                    <button onClick={()=>setConfirmAction({ type: 'tr', data: tr, title: '刪除項目', msg: `確定要刪除治療項目「${tr.name}」嗎？` })} className="text-stone-200 hover:text-red-400 p-1 ml-1"><Trash2 size={12}/></button>
+                                                </div>
+                                            </td>
+                                         </tr>
+                                       ))}
+                                    </tbody>
+                                </table>
+                             </div>
+                         </div>
+                      ))}
+                   </div>
+                )}
+                {tab === 'd' && (
+                   <div className="max-w-xs mx-auto py-10 space-y-6 text-center">
+                      <div><div className="w-12 h-12 bg-amber-50 text-brand-orange rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-inner"><Database size={24}/></div><h3 className="text-sm font-black text-stone-800">資料備份與還原</h3><p className="text-[10px] text-stone-400 font-bold mt-1 leading-relaxed">紀錄存放於本機瀏覽器，請定期下載備份以免遺失。</p></div>
+                      <div className="grid gap-2">
+                         <Button onClick={handleExport} size="lg" className="w-full" icon={<Download size={16}/>}>下載備份檔案</Button>
+                         <label className="block"><span className="w-full h-11 rounded-xl border border-dashed border-stone-200 flex items-center justify-center gap-2 text-stone-400 font-bold cursor-pointer hover:bg-stone-50 transition-all text-xs"><Upload size={16}/> 選取檔案還原</span><input type="file" className="hidden" accept=".json" onChange={e => {
+                            const f = e.target.files?.[0]; if (!f) return;
+                            const r = new FileReader(); r.onload = (ev) => {
+                               try {
+                                  const data = JSON.parse(ev.target.result);
+                                  if (confirm('還原資料將完全覆蓋現有紀錄，確定繼續？')) {
+                                     if(data.therapists) onUpdateTherapists(data.therapists);
+                                     if(data.treatments) onUpdateTreatments(data.treatments);
+                                     if(data.appointments) DataService.saveAppointments(data.appointments);
+                                     window.location.reload();
+                                  }
+                               } catch (err) { alert('檔案錯誤'); }
+                            }; r.readAsText(f);
+                         }} /></label>
+                      </div>
+                   </div>
+                )}
+             </div>
+
+             {/* Add Personnel Modal */}
+             <Modal isOpen={isTModalOpen} onClose={() => setIsTModalOpen(false)} title="新增醫護人員/師資">
+                <form onSubmit={handleAddT} className="space-y-4">
+                  <div>
+                    <label className="block text-[10px] font-black text-stone-400 uppercase tracking-widest mb-1 ml-1">人員姓名</label>
+                    <input className="w-full h-10 px-3 rounded-lg border border-stone-200 font-bold bg-stone-50 outline-none focus:border-brand-orange" placeholder="請輸入姓名" value={tForm.name} onChange={e=>setTForm({...tForm, name:e.target.value})} required />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-black text-stone-400 uppercase tracking-widest mb-1 ml-1">專業類別</label>
+                    <div className="flex gap-1 p-0.5 bg-stone-100 rounded-lg">
+                      {['心理','職能','rTMS'].map(c=>(
+                        <button key={c} type="button" onClick={()=>setTForm({...tForm, category:c})} className={`flex-1 py-2 rounded-md text-[10px] font-black transition-all ${tForm.category===c ? 'bg-white shadow-sm text-stone-800 border border-stone-100':'text-stone-400 hover:text-stone-600'}`}>{c}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="pt-2">
+                    <Button type="submit" size="lg" className="w-full">確認並新增</Button>
+                  </div>
+                </form>
+             </Modal>
+
+             {/* Settings Action Confirmation Modal */}
+             <Modal 
+                isOpen={!!confirmAction} 
+                onClose={()=>setConfirmAction(null)} 
+                title={confirmAction?.title || "確認刪除"} 
+                footer={
+                   <>
+                      <Button variant="secondary" size="md" onClick={()=>setConfirmAction(null)}>返回</Button>
+                      <Button variant="danger" size="md" onClick={executeDelete}>確定刪除</Button>
+                   </>
+                }
+             >
+                <div className="flex items-start gap-4 p-3 bg-red-50 rounded-xl border border-red-100">
+                  <div className="p-2 bg-red-100 text-red-600 rounded-lg shrink-0"><TriangleAlert size={20} /></div>
+                  <p className="text-xs font-bold text-stone-700 leading-relaxed">{confirmAction?.msg}</p>
+                </div>
+             </Modal>
+          </div>
+        );
+      };
+
+      const ReportsView = ({ appointments, therapists, treatments }) => {
+        const [month, setMonth] = useState(format(new Date(), 'yyyy-MM'));
+        const [expand, setExpand] = useState(null);
+
+        const data = useMemo(() => {
+          const [y, m] = month.split('-').map(Number);
+          const start = new Date(y, m-1, 1);
+          const end = new Date(y, m, 0, 23, 59, 59);
+          const filtered = appointments.filter(a => {
+            const d = new Date(a.date);
+            return d >= start && d <= end && a.status === 'completed';
+          });
+          const rev = filtered.reduce((s, a) => s + (a.isPaid ? a.paidAmount : 0), 0);
+          const tStats = therapists.map(t => {
+            const ta = filtered.filter(a => a.therapistId === t.id);
+            const r = ta.reduce((s, a) => s + a.paidAmount, 0);
+            const f = ta.reduce((s, a) => s + a.therapistFee, 0);
+            return { ...t, count: ta.length, rev: r, fee: f, details: ta };
+          }).filter(x => x.count > 0).sort((a,b)=>b.rev - a.rev);
+          return { rev, count: filtered.length, tStats };
+        }, [appointments, month, therapists]);
+
+        return (
+          <div className="space-y-4 pb-20">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-4 rounded-2xl border border-stone-100 shadow-sm print:hidden">
+               <div><h2 className="text-base font-black text-stone-800">經營報表分析</h2><p className="text-[10px] text-stone-400 font-bold mt-0.5 uppercase tracking-widest leading-none">{month} Financials</p></div>
+               <input type="month" className="h-9 px-3 rounded-lg border border-stone-100 font-bold outline-none bg-stone-50 text-xs" value={month} onChange={e=>setMonth(e.target.value)} />
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 print:hidden">
+              <div className="bg-stone-900 p-4 rounded-xl text-white shadow-md"><p className="text-[9px] font-black text-white/40 uppercase mb-1 leading-none">本月營收</p><p className="text-base font-black">${data.rev.toLocaleString()}</p></div>
+              <div className="bg-white p-4 rounded-xl border border-stone-100 shadow-sm"><p className="text-[9px] text-stone-400 font-bold uppercase mb-1 leading-none">完診人次</p><p className="text-base font-black text-stone-800">{data.count}</p></div>
+              <div className="bg-white p-4 rounded-xl border border-stone-100 shadow-sm"><p className="text-[9px] text-stone-400 font-bold uppercase mb-1 leading-none">薪資支出</p><p className="text-base font-black text-brand-orange">${data.tStats.reduce((s,x)=>s+x.fee,0).toLocaleString()}</p></div>
+              <div className="bg-white p-4 rounded-xl border border-stone-100 shadow-sm"><p className="text-[9px] text-stone-400 font-bold uppercase mb-1 leading-none">估計利潤</p><p className="text-base font-black text-emerald-600">${(data.rev - data.tStats.reduce((s,x)=>s+x.fee,0)).toLocaleString()}</p></div>
+            </div>
+
+            <div className="space-y-2">
+              {data.tStats.map(t => (
+                <div key={t.id} className="bg-white rounded-xl border border-stone-100 overflow-hidden shadow-sm hover:border-brand-yellow transition-all">
+                   <button onClick={()=>setExpand(expand===t.id?null:t.id)} className="w-full p-4 flex items-center justify-between gap-4 text-left">
+                     <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-amber-50 text-brand-orange rounded-lg flex items-center justify-center font-black text-sm shadow-inner">{t.name[0]}</div>
+                        <div><p className="text-sm font-black text-stone-800">{t.name}</p><p className="text-[9px] text-stone-400 font-bold uppercase tracking-widest leading-none">{t.category}</p></div>
+                     </div>
+                     <div className="flex items-center gap-4 overflow-hidden">
+                        <div className="text-right shrink-0"><p className="text-[8px] text-stone-300 font-bold uppercase leading-none">營收</p><p className="text-xs font-black text-stone-700">${t.rev.toLocaleString()}</p></div>
+                        <div className="text-right shrink-0"><p className="text-[8px] text-brand-orange font-bold uppercase leading-none">薪資</p><p className="text-xs font-black text-brand-orange">${t.fee.toLocaleString()}</p></div>
+                        {expand === t.id ? <ChevronUp size={14} className="text-stone-300"/> : <ChevronDown size={14} className="text-stone-300"/>}
+                     </div>
+                   </button>
+                   {expand === t.id && (
+                     <div className="px-4 pb-4 animate-in slide-in-from-top-1 duration-200">
+                        <div className="bg-stone-50 rounded-lg overflow-x-auto no-scrollbar border border-stone-100">
+                           <table className="w-full text-left text-[10px] font-bold border-collapse">
+                              <thead className="bg-stone-100/50 text-stone-400"><tr className="border-b border-stone-100"><th className="p-2">日期</th><th className="p-2">個案</th><th className="p-2">項目</th><th className="p-2 text-right">薪資</th></tr></thead>
+                              <tbody className="divide-y divide-stone-100">
+                                {t.details.map(d=>(
+                                  <tr key={d.id} className="text-stone-600"><td className="p-2 whitespace-nowrap">{d.date.slice(5)}</td><td className="p-2">{d.patientName}</td><td className="p-2 truncate max-w-[60px]">{treatments.find(x=>x.id===d.treatmentId)?.name}</td><td className="p-2 text-right text-brand-orange font-black">${d.earnedFee || d.therapistFee}</td></tr>
+                                ))}
+                              </tbody>
+                           </table>
+                        </div>
+                     </div>
+                   )}
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      };
+
+      const App = () => {
+        const [user, setUser] = useState(null);
+        const [view, setView] = useState('schedule');
+        const [sideOpen, setSideOpen] = useState(false);
+        const [therapists, setTherapists] = useState([]);
+        const [treatments, setTreatments] = useState([]);
+        const [appointments, setAppointments] = useState([]);
+        const [users, setUsers] = useState([]);
+
+        useEffect(() => {
+          setTherapists(DataService.getTherapists());
+          setTreatments(DataService.getTreatments());
+          setAppointments(DataService.getAppointments());
+          setUsers(DataService.getUsers());
+          document.getElementById('loading').style.display = 'none';
+        }, []);
+
+        useEffect(() => { if (user) DataService.saveTherapists(therapists); }, [therapists]);
+        useEffect(() => { if (user) DataService.saveTreatments(treatments); }, [treatments]);
+        useEffect(() => { if (user) DataService.saveAppointments(appointments); }, [appointments]);
+        useEffect(() => { if (user) DataService.saveUsers(users); }, [users]);
+
+        if (!user) return <LoginView users={users} onLogin={setUser} />;
+
+        const NavItem = ({ id, icon, label, adminOnly = false }) => {
+          if (adminOnly && user.role !== 'admin') return null;
+          const active = view === id;
+          return (
+            <button onClick={()=>{setView(id); setSideOpen(false);}} className={`w-full flex items-center gap-3 px-5 py-3.5 rounded-xl text-xs font-black transition-all ${active ? 'bg-brand-orange text-white shadow-md translate-x-1':'text-stone-400 hover:bg-stone-800/50 hover:text-brand-yellow'}`}>
+              {React.cloneElement(icon, { size: 18, strokeWidth: active ? 3 : 2 })} {label}
+            </button>
+          );
+        };
+
+        return (
+          <div className="min-h-screen bg-[#fffef5] flex relative overflow-hidden">
+            {/* Mobile Header */}
+            <div className="lg:hidden fixed top-0 inset-x-0 h-12 bg-white/90 backdrop-blur-md border-b border-stone-100 px-4 flex items-center justify-between z-40 shadow-sm">
+               <div className="flex items-center gap-2 font-black text-stone-800 text-sm"><JialeLogo /> 佳樂診所</div>
+               <button onClick={()=>setSideOpen(true)} className="p-1.5 bg-stone-50 rounded-lg border border-stone-100"><Menu size={18} /></button>
+            </div>
+
+            {/* Sidebar */}
+            <aside className={`fixed lg:sticky top-0 inset-y-0 left-0 w-64 bg-stone-900 text-white z-50 transform transition-transform duration-300 lg:translate-x-0 ${sideOpen ? 'translate-x-0':' -translate-x-full shadow-2xl'}`}>
+               <div className="p-6 flex items-center gap-3 border-b border-stone-800/50">
+                  <div className="bg-white p-1.5 rounded-xl"><JialeLogo /></div>
+                  <div><h1 className="font-black text-lg leading-none">佳樂診所</h1><p className="text-[8px] text-brand-orange font-bold uppercase tracking-[0.2em] mt-1 leading-none">Management</p></div>
+                  <button onClick={()=>setSideOpen(false)} className="lg:hidden ml-auto text-stone-500"><X size={18}/></button>
+               </div>
+               <nav className="p-4 space-y-1.5 mt-4">
+                  <NavItem id="schedule" icon={<Calendar/>} label="預約排程" />
+                  <NavItem id="reports" icon={<ChartColumn/>} label="統計月報表" adminOnly />
+                  <NavItem id="settings" icon={<Settings/>} label={user.role==='admin'?'基本資料設定':'備份/資料管理'} />
+               </nav>
+               <div className="absolute bottom-0 inset-x-0 p-5 border-t border-stone-800/50 space-y-4">
+                  <div className="flex items-center gap-3 px-2">
+                    <div className="w-9 h-9 bg-stone-800 rounded-lg flex items-center justify-center text-brand-yellow shadow-inner border border-stone-700/50"><UserIcon size={16}/></div>
+                    <div className="overflow-hidden text-left"><p className="text-xs font-black truncate leading-none">{user.name}</p><p className="text-[8px] text-stone-500 font-bold uppercase mt-1 leading-none">{user.role==='admin'?'管理員':'系統人員'}</p></div>
+                  </div>
+                  <button onClick={()=>setUser(null)} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-red-500/10 text-red-400 text-[10px] font-black hover:bg-red-500/20 transition-all border border-red-500/10"><LogOut size={12}/> 登出系統</button>
+               </div>
+            </aside>
+
+            {/* Overlay for Mobile */}
+            {sideOpen && <div className="fixed inset-0 bg-stone-900/60 backdrop-blur-xs z-30 lg:hidden animate-in fade-in" onClick={()=>setSideOpen(false)}></div>}
+
+            {/* Main Content Area */}
+            <main className="flex-1 p-3 sm:p-6 lg:p-8 pt-16 lg:pt-8 overflow-x-hidden min-h-screen">
+               <div className="max-w-5xl mx-auto">
+                  {view === 'schedule' && <ScheduleView appointments={appointments} therapists={therapists} treatments={treatments} onAddAppointment={x=>setAppointments([...appointments,{...x, id:`apt_${Date.now()}`}])} onUpdateAppointment={(id,u)=>setAppointments(appointments.map(a=>a.id===id?{...a,...u}:a))} onDeleteAppointment={id=>setAppointments(appointments.filter(a=>a.id!==id))} />}
+                  {view === 'reports' && <ReportsView appointments={appointments} therapists={therapists} treatments={treatments} />}
+                  {view === 'settings' && <SettingsView currentUser={user} therapists={therapists} treatments={treatments} users={users} onUpdateTherapists={setTherapists} onUpdateTreatments={setTreatments} onUpdateUsers={setUsers} />}
+               </div>
+            </main>
+          </div>
+        );
+      };
+
+      createRoot(document.getElementById('root')).render(<App />);
+    </script>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>

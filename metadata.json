@@ -1,0 +1,5 @@
+{
+  "name": "Jiale Clinic Desktop Scheduler",
+  "description": "Python based desktop application using CustomTkinter and SQLite for zero-latency clinic management.",
+  "requestFramePermissions": []
+}
