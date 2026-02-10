@@ -2,8 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { format } from 'date-fns';
 import { Appointment, Therapist, Treatment } from '../types';
-// Add Info to the lucide-react imports
-import { DollarSign, Calendar as CalendarIcon, Briefcase, FileText, Printer, PieChart, Users, ReceiptText, ChevronDown, ChevronUp, UserCheck, TrendingUp, BarChart, Coffee, Sparkles, ClipboardList, Info } from 'lucide-react';
+import { DollarSign, Calendar as CalendarIcon, Briefcase, FileText, Printer, PieChart, Users, ReceiptText, ChevronDown, ChevronUp, UserCheck, TrendingUp, BarChart, Coffee, Sparkles, ClipboardList, Info, FileSpreadsheet } from 'lucide-react';
 import { Button } from '../components/Button';
 import { JialeLogo } from '../App';
 
@@ -75,6 +74,38 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ appointments, therapis
     setTimeout(() => window.print(), 500);
   };
 
+  const handleExportExcel = () => {
+    // CSV with BOM for Excel compatibility
+    let csvContent = "\uFEFF";
+    csvContent += "治療師,專業類別,日期,時間,個案姓名,治療項目,實收金額,薪資,備註\n";
+
+    monthData.therapistStats.forEach(t => {
+        t.details.forEach(d => {
+            // Escape values to prevent CSV injection
+            const safeNotes = d.notes.replace(/,/g, '，').replace(/\n/g, ' ');
+            csvContent += `${t.name},${t.category},${d.date},${d.time},${d.patientName},${d.treatmentName},${d.patientPaid},${d.earnedFee},${safeNotes}\n`;
+        });
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `佳樂診所_薪資報表_${selectedMonth}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Group therapists into pairs for A4 landscape printing
+  const therapistPairs = useMemo(() => {
+    const pairs = [];
+    for (let i = 0; i < monthData.therapistStats.length; i += 2) {
+        pairs.push(monthData.therapistStats.slice(i, i + 2));
+    }
+    return pairs;
+  }, [monthData.therapistStats]);
+
   const hasData = monthData.completedCount > 0;
 
   return (
@@ -95,7 +126,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ appointments, therapis
               onChange={(e) => setSelectedMonth(e.target.value)}
             />
           </div>
-          <Button variant="secondary" size="md" disabled={!hasData} onClick={handlePrint} icon={<Printer size={24} />}>列印本月薪資單</Button>
+          <Button variant="secondary" size="md" disabled={!hasData} onClick={handleExportExcel} icon={<FileSpreadsheet size={24} />}>匯出 Excel 報表</Button>
+          <Button variant="primary" size="md" disabled={!hasData} onClick={handlePrint} icon={<Printer size={24} />}>列印本月薪資單</Button>
         </div>
       </div>
 
@@ -287,78 +319,77 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ appointments, therapis
                     <div className="print-hidden p-12 bg-brand-yellow/10 border-b border-brand-yellow/20 flex items-center justify-between">
                         <div>
                             <h3 className="text-3xl font-black text-stone-800">薪資單預覽模式</h3>
-                            <p className="text-stone-500 font-bold mt-2">格式已調整為 A4 大小，點擊列印後將一人一頁產出。</p>
+                            <p className="text-stone-500 font-bold mt-2">格式已調整為 A4 橫式雙模，每頁將並排顯示兩位人員的薪資單。</p>
                         </div>
                         <JialeLogo className="w-20 h-20 opacity-30" />
                     </div>
                     
-                    <div className="space-y-0">
-                        {monthData.therapistStats.map(t => (
-                            <div key={t.id} className="salary-slip bg-white p-16 md:p-24 shadow-none border-b border-stone-100 last:border-none">
-                                <div className="flex justify-between items-center mb-16 border-b-[6px] border-stone-900 pb-10">
-                                    <div className="flex items-center gap-6">
-                                        <JialeLogo className="w-20 h-20" />
-                                        <div>
-                                            <h1 className="text-5xl font-black text-stone-900 tracking-tighter mb-1">薪資明細單</h1>
-                                            <p className="text-xl font-bold text-brand-orange uppercase tracking-[0.2em]">{selectedMonth} PAYROLL RECORD</p>
-                                        </div>
-                                    </div>
-                                </div>
+                    <div>
+                      {therapistPairs.map((pair, index) => (
+                          <div key={index} className="print-page-container">
+                              {pair.map(t => (
+                                  <div key={t.id} className="salary-slip">
+                                      <div className="flex justify-between items-center mb-6 border-b-[4px] border-stone-900 pb-4">
+                                          <div className="flex items-center gap-3">
+                                              <JialeLogo className="w-10 h-10" />
+                                              <div>
+                                                  <h1 className="text-2xl font-black text-stone-900 tracking-tighter mb-0">薪資明細單</h1>
+                                                  <p className="text-xs font-bold text-brand-orange uppercase tracking-[0.1em]">{selectedMonth}</p>
+                                              </div>
+                                          </div>
+                                      </div>
 
-                                <div className="grid grid-cols-2 gap-12 mb-16">
-                                    <div className="space-y-4">
-                                        <p className="text-xs font-black text-stone-400 uppercase tracking-widest">治療師 Therapist</p>
-                                        <p className="text-4xl font-black text-stone-900">{t.name} <span className="text-brand-orange text-2xl ml-3">({t.category})</span></p>
-                                    </div>
-                                    <div className="text-right space-y-4">
-                                        <p className="text-xs font-black text-stone-400 uppercase tracking-widest">結算月份 Period</p>
-                                        <p className="text-4xl font-black text-stone-900">{selectedMonth}</p>
-                                    </div>
-                                </div>
+                                      <div className="flex justify-between gap-4 mb-6">
+                                          <div>
+                                              <p className="text-[10px] font-black text-stone-400 uppercase tracking-widest">Therapist</p>
+                                              <p className="text-xl font-black text-stone-900">{t.name} <span className="text-brand-orange text-sm ml-1">({t.category})</span></p>
+                                          </div>
+                                          <div className="text-right">
+                                              <p className="text-[10px] font-black text-stone-400 uppercase tracking-widest">Total</p>
+                                              <p className="text-2xl font-black text-stone-900 bg-brand-yellow/20 px-2 rounded">${Math.round(t.commission).toLocaleString()}</p>
+                                          </div>
+                                      </div>
 
-                                <table className="w-full mb-16">
-                                    <thead>
-                                        <tr className="border-y-2 border-stone-900 bg-stone-50">
-                                            <th className="py-6 text-left px-4 font-black text-stone-800 text-sm">日期 Date</th>
-                                            <th className="py-6 text-left px-4 font-black text-stone-800 text-sm">個案 Patient</th>
-                                            <th className="py-6 text-left px-4 font-black text-stone-800 text-sm">治療項目 Treatment</th>
-                                            <th className="py-6 text-right px-4 font-black text-stone-800 text-sm">金額 Amount</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-stone-200">
-                                        {t.details.map(detail => (
-                                            <tr key={detail.id}>
-                                                <td className="py-6 px-4 font-bold text-stone-500">{detail.date}</td>
-                                                <td className="py-6 px-4 font-black text-stone-900 text-lg">{detail.patientName}</td>
-                                                <td className="py-6 px-4 font-bold text-stone-600">{detail.treatmentName}</td>
-                                                <td className="py-6 px-4 text-right font-black text-stone-900 text-xl">${Math.round(detail.earnedFee).toLocaleString()}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                    <tfoot>
-                                        <tr className="border-t-[4px] border-stone-900 bg-stone-50">
-                                            <td colSpan={3} className="py-10 px-4 text-right font-black text-3xl text-stone-900">本月薪資應領總計 Total:</td>
-                                            <td className="py-10 px-4 text-right font-black text-5xl text-brand-orange">${Math.round(t.commission).toLocaleString()}</td>
-                                        </tr>
-                                    </tfoot>
-                                </table>
+                                      <div className="salary-table-container overflow-hidden">
+                                        <table className="w-full text-xs">
+                                            <thead>
+                                                <tr className="border-y-2 border-stone-900 bg-stone-50">
+                                                    <th className="py-2 text-left px-2 font-black text-stone-800">日期</th>
+                                                    <th className="py-2 text-left px-2 font-black text-stone-800">個案</th>
+                                                    <th className="py-2 text-left px-2 font-black text-stone-800">項目</th>
+                                                    <th className="py-2 text-right px-2 font-black text-stone-800">金額</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-stone-200">
+                                                {t.details.map(detail => (
+                                                    <tr key={detail.id}>
+                                                        <td className="py-2 px-2 font-bold text-stone-500 whitespace-nowrap">{detail.date.slice(5)}</td>
+                                                        <td className="py-2 px-2 font-black text-stone-900">{detail.patientName}</td>
+                                                        <td className="py-2 px-2 font-bold text-stone-600 truncate max-w-[100px]">{detail.treatmentName}</td>
+                                                        <td className="py-2 px-2 text-right font-black text-stone-900">${Math.round(detail.earnedFee).toLocaleString()}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                      </div>
 
-                                <div className="grid grid-cols-3 gap-16 pt-20 mt-20 border-t border-stone-100">
-                                    <div className="space-y-12">
-                                        <p className="text-[10px] font-black text-stone-400 uppercase tracking-widest">人員簽認 Signature</p>
-                                        <div className="border-b-2 border-stone-200 h-10 w-full"></div>
-                                    </div>
-                                    <div className="space-y-12">
-                                        <p className="text-[10px] font-black text-stone-400 uppercase tracking-widest">核薪主管 Approved by</p>
-                                        <div className="border-b-2 border-stone-200 h-10 w-full"></div>
-                                    </div>
-                                    <div className="space-y-12 flex flex-col items-center">
-                                        <p className="text-[10px] font-black text-stone-400 uppercase tracking-widest">診所單位蓋章 Official Seal</p>
-                                        <div className="h-32 w-32 border-4 border-double border-stone-200 rounded-full flex items-center justify-center text-[10px] text-stone-300 font-black text-center p-3">佳樂身心診所<br/>人事專用章</div>
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
+                                      <div className="grid grid-cols-3 gap-6 pt-6 mt-6 border-t border-stone-100 text-[9px]">
+                                          <div className="space-y-6">
+                                              <p className="font-black text-stone-400 uppercase tracking-widest">簽認 Signature</p>
+                                              <div className="border-b border-stone-200 h-6 w-full"></div>
+                                          </div>
+                                          <div className="space-y-6">
+                                              <p className="font-black text-stone-400 uppercase tracking-widest">主管 Approved</p>
+                                              <div className="border-b border-stone-200 h-6 w-full"></div>
+                                          </div>
+                                          <div className="space-y-2 flex flex-col items-center justify-end">
+                                               <div className="text-center font-black text-stone-300 border-2 border-double border-stone-200 p-2 rounded-full w-16 h-16 flex items-center justify-center">佳樂<br/>人事</div>
+                                          </div>
+                                      </div>
+                                  </div>
+                              ))}
+                          </div>
+                      ))}
                     </div>
                 </div>
             )}
